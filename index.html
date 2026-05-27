@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스팩 청산가치 트래커</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Malgun Gothic', sans-serif;
+         margin: 0; padding: 16px; background: #f5f5f5; color: #222; }
+  .container { max-width: 1500px; margin: 0 auto; background: #fff; padding: 24px;
+               border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+  h1 { color: #1F4E79; margin: 0 0 4px 0; font-size: 22px; }
+  .meta { color: #666; font-size: 13px; margin-bottom: 18px; }
+  .stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 18px; }
+  .stat { padding: 10px; background: #F0F2F6; border-radius: 6px; text-align: center; }
+  .stat .label { font-size: 11px; color: #666; }
+  .stat .value { font-size: 20px; font-weight: bold; color: #1F4E79; margin-top: 2px; }
+  .filters { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; font-size: 13px; }
+  .filters input[type=text] { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; flex: 1; min-width: 180px; font-size: 13px; }
+  .filters label { color: #333; cursor: pointer; user-select: none; }
+  .table-wrap { overflow-x: auto; max-height: 70vh; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead { background: #1F4E79; color: #fff; position: sticky; top: 0; z-index: 1; }
+  th { padding: 8px 6px; text-align: left; cursor: pointer; user-select: none; white-space: nowrap; }
+  th:hover { background: #2a5e8f; }
+  th .arrow { opacity: 0.5; font-size: 10px; margin-left: 3px; }
+  th.sort-asc .arrow, th.sort-desc .arrow { opacity: 1; }
+  td { padding: 6px; border-bottom: 1px solid #f0f0f0; white-space: nowrap; }
+  tr:hover td { background: #fafafa; }
+  td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+  td.center { text-align: center; }
+  .days-red { background: #FFCDD2 !important; font-weight: bold; }
+  .days-yellow { background: #FFF59D !important; }
+  .source-DART { background: #C8E6C9; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+  .source-KSFC { background: #E0E0E0; color: #666; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+  .source-MIXED { background: #FFF9C4; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+  .source-MANUAL { background: #BBDEFB; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+  .yield-high { color: #1B5E20; font-weight: bold; }
+  .yield-mid { color: #2E7D32; }
+  .yield-neg { color: #C62828; }
+  .legend { font-size: 11px; color: #666; margin-top: 8px; line-height: 1.6; }
+  .footer { margin-top: 20px; font-size: 11px; color: #999; text-align: center; line-height: 1.6; }
+  @media (max-width: 768px) {
+    body { padding: 8px; }
+    .container { padding: 12px; }
+    .stats { grid-template-columns: repeat(2,1fr); }
+    table { font-size: 10px; }
+    td, th { padding: 4px; }
+    h1 { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📈 스팩 청산가치 트래커</h1>
+  <div class="meta" id="meta">로딩 중...</div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="filters">
+    <input type="text" id="search" placeholder="🔍 종목명 검색...">
+    <label><input type="checkbox" id="hideNoRate"> 이율 미상 숨김</label>
+    <label><input type="checkbox" id="onlyPositive"> 플러스 수익률만</label>
+    <label><input type="checkbox" id="imminentOnly"> 청산임박(180일↓)</label>
+    <span id="count" style="color:#666; margin-left:auto;"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th data-key="ticker">종목코드<span class="arrow">↕</span></th>
+          <th data-key="name">종목명<span class="arrow">↕</span></th>
+          <th data-key="payment_date">납입기일<span class="arrow">↕</span></th>
+          <th data-key="estimated_liquidation_date">청산예상일<span class="arrow">↕</span></th>
+          <th data-key="days_until_liquidation">남은일수<span class="arrow">↕</span></th>
+          <th data-key="offering_price">공모가<span class="arrow">↕</span></th>
+          <th data-key="current_price">현재가<span class="arrow">↕</span></th>
+          <th data-key="rate_y1">1년차%<span class="arrow">↕</span></th>
+          <th data-key="rate_y2">2년차%<span class="arrow">↕</span></th>
+          <th data-key="rate_y3">3년차%<span class="arrow">↕</span></th>
+          <th data-key="liquidation_value">예상청산금<span class="arrow">↕</span></th>
+          <th data-key="total_return_pct">총수익률%<span class="arrow">↕</span></th>
+          <th data-key="annualized_return_pct">연환산%<span class="arrow">↕</span></th>
+          <th data-key="rate_source">이율출처</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="legend">
+    🟥 90일 이하 (관리종목 임박) · 🟨 180일 이하 |
+    🟩 DART (확정 공시) · ⬜ KSFC (보수적 추정) · 🟨 MIXED (혼합) · 🟦 MANUAL (수동)
+  </div>
+
+  <div class="footer">
+    이 도구는 정보 제공 목적이며 투자 권유가 아닙니다.<br>
+    데이터 출처: KRX, DART(opendart.fss.or.kr), 한국증권금융(ksfc.co.kr)
+  </div>
+</div>
+
+<script>
+const DATA = [{"ticker": "477760", "name": "DB금융스팩12호", "payment_date": null, "estimated_liquidation_date": null, "days_until_liquidation": null, "offering_price": 2000.0, "current_price": 2030.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 4.38, "annualized_return_pct": null, "rate_source": "KSFC"}, {"ticker": "473950", "name": "에스케이증권제13호스팩", "payment_date": null, "estimated_liquidation_date": null, "days_until_liquidation": null, "offering_price": 2000.0, "current_price": 2040.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 3.87, "annualized_return_pct": null, "rate_source": "KSFC"}, {"ticker": "472230", "name": "에스케이증권제11호스팩", "payment_date": null, "estimated_liquidation_date": null, "days_until_liquidation": null, "offering_price": 2000.0, "current_price": 2070.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 2.37, "annualized_return_pct": null, "rate_source": "KSFC"}, {"ticker": "473000", "name": "에스케이증권제12호스팩", "payment_date": null, "estimated_liquidation_date": null, "days_until_liquidation": null, "offering_price": 2000.0, "current_price": 2055.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 3.11, "annualized_return_pct": null, "rate_source": "KSFC"}, {"ticker": "464680", "name": "KB제27호스팩", "payment_date": "2023-10-24", "estimated_liquidation_date": "2026-09-08", "days_until_liquidation": 104, "offering_price": 2000.0, "current_price": 2105.0, "rate_y1": 3.75, "rate_y2": 3.1, "rate_y3": 2.25, "liquidation_value": 2159.5, "total_return_pct": 2.59, "annualized_return_pct": 9.39, "rate_source": "DART"}, {"ticker": "464440", "name": "한국제13호스팩", "payment_date": "2023-11-01", "estimated_liquidation_date": "2026-09-16", "days_until_liquidation": 112, "offering_price": 2000.0, "current_price": 2105.0, "rate_y1": 3.75, "rate_y2": 3.1, "rate_y3": 2.25, "liquidation_value": 2159.5, "total_return_pct": 2.59, "annualized_return_pct": 8.69, "rate_source": "DART"}, {"ticker": "465320", "name": "교보15호스팩", "payment_date": "2023-11-23", "estimated_liquidation_date": "2026-10-08", "days_until_liquidation": 134, "offering_price": 2000.0, "current_price": 2335.0, "rate_y1": 4.0, "rate_y2": 3.3, "rate_y3": 2.88, "liquidation_value": 2174.8, "total_return_pct": -6.86, "annualized_return_pct": -17.61, "rate_source": "DART"}, {"ticker": "467930", "name": "IBKS제23호스팩", "payment_date": "2023-12-12", "estimated_liquidation_date": "2026-10-27", "days_until_liquidation": 153, "offering_price": 2000.0, "current_price": 2105.0, "rate_y1": 3.8, "rate_y2": 3.2, "rate_y3": 2.92, "liquidation_value": 2169.2, "total_return_pct": 3.05, "annualized_return_pct": 7.44, "rate_source": "DART"}, {"ticker": "469880", "name": "하나30호스팩", "payment_date": "2023-12-13", "estimated_liquidation_date": "2026-10-28", "days_until_liquidation": 154, "offering_price": 2000.0, "current_price": 2100.0, "rate_y1": 3.75, "rate_y2": 3.1, "rate_y3": 2.55, "liquidation_value": 2162.5, "total_return_pct": 2.98, "annualized_return_pct": 7.2, "rate_source": "DART"}, {"ticker": "471050", "name": "대신밸런스제17호스팩", "payment_date": "2024-01-15", "estimated_liquidation_date": "2026-11-30", "days_until_liquidation": 187, "offering_price": 2000.0, "current_price": 2100.0, "rate_y1": 3.6, "rate_y2": 3.0, "rate_y3": 2.8, "liquidation_value": 2160.0, "total_return_pct": 2.86, "annualized_return_pct": 5.66, "rate_source": "DART"}, {"ticker": "469480", "name": "IBKS제24호스팩", "payment_date": "2024-01-23", "estimated_liquidation_date": "2026-12-08", "days_until_liquidation": 195, "offering_price": 2000.0, "current_price": 2400.0, "rate_y1": 3.6, "rate_y2": 3.0, "rate_y3": 2.85, "liquidation_value": 2160.5, "total_return_pct": -9.98, "annualized_return_pct": -17.87, "rate_source": "DART"}, {"ticker": "472220", "name": "신영스팩10호", "payment_date": "2024-01-25", "estimated_liquidation_date": "2026-12-10", "days_until_liquidation": 197, "offering_price": 2000.0, "current_price": 2130.0, "rate_y1": 3.6, "rate_y2": 2.43, "rate_y3": 2.77, "liquidation_value": 2148.3, "total_return_pct": 0.86, "annualized_return_pct": 1.6, "rate_source": "DART"}, {"ticker": "468760", "name": "유진스팩10호", "payment_date": "2024-02-19", "estimated_liquidation_date": "2027-01-04", "days_until_liquidation": 222, "offering_price": 2000.0, "current_price": 2080.0, "rate_y1": 3.6, "rate_y2": 2.95, "rate_y3": 2.91, "liquidation_value": 2160.1, "total_return_pct": 3.85, "annualized_return_pct": 6.41, "rate_source": "DART"}, {"ticker": "473050", "name": "유안타제15호스팩", "payment_date": "2024-02-20", "estimated_liquidation_date": "2027-01-05", "days_until_liquidation": 223, "offering_price": 2000.0, "current_price": 2075.0, "rate_y1": 3.6, "rate_y2": 2.95, "rate_y3": 2.91, "liquidation_value": 2160.1, "total_return_pct": 4.1, "annualized_return_pct": 6.8, "rate_source": "DART"}, {"ticker": "469900", "name": "하나31호스팩", "payment_date": "2024-02-22", "estimated_liquidation_date": "2027-01-07", "days_until_liquidation": 225, "offering_price": 2000.0, "current_price": 2070.0, "rate_y1": 3.32, "rate_y2": 2.7, "rate_y3": 2.55, "liquidation_value": 2145.9, "total_return_pct": 3.67, "annualized_return_pct": 6.02, "rate_source": "DART"}, {"ticker": "475240", "name": "하나32호스팩", "payment_date": "2024-03-18", "estimated_liquidation_date": "2027-02-01", "days_until_liquidation": 250, "offering_price": 2000.0, "current_price": 2100.0, "rate_y1": 3.32, "rate_y2": 2.6, "rate_y3": 2.55, "liquidation_value": 2143.9, "total_return_pct": 2.09, "annualized_return_pct": 3.07, "rate_source": "DART"}, {"ticker": "474660", "name": "신한제12호스팩", "payment_date": "2024-04-02", "estimated_liquidation_date": "2027-02-16", "days_until_liquidation": 265, "offering_price": 2000.0, "current_price": 2050.0, "rate_y1": 3.45, "rate_y2": 2.49, "rate_y3": 2.49, "liquidation_value": 2143.7, "total_return_pct": 4.57, "annualized_return_pct": 6.35, "rate_source": "DART"}, {"ticker": "474930", "name": "신한제13호스팩", "payment_date": "2024-04-11", "estimated_liquidation_date": "2027-02-25", "days_until_liquidation": 274, "offering_price": 2000.0, "current_price": 2100.0, "rate_y1": 3.45, "rate_y2": 2.65, "rate_y3": 2.65, "liquidation_value": 2148.5, "total_return_pct": 2.31, "annualized_return_pct": 3.09, "rate_source": "DART"}, {"ticker": "475250", "name": "하나33호스팩", "payment_date": "2024-04-15", "estimated_liquidation_date": "2027-03-01", "days_until_liquidation": 278, "offering_price": 2000.0, "current_price": 2075.0, "rate_y1": 3.32, "rate_y2": 2.6, "rate_y3": 2.55, "liquidation_value": 2143.9, "total_return_pct": 3.32, "annualized_return_pct": 4.39, "rate_source": "DART"}, {"ticker": "474490", "name": "유안타제16호스팩", "payment_date": "2024-04-22", "estimated_liquidation_date": "2027-03-08", "days_until_liquidation": 285, "offering_price": 2000.0, "current_price": 2050.0, "rate_y1": 3.45, "rate_y2": 2.6, "rate_y3": 2.93, "liquidation_value": 2150.3, "total_return_pct": 4.89, "annualized_return_pct": 6.31, "rate_source": "DART"}, {"ticker": "477380", "name": "미래에셋비전스팩4호", "payment_date": "2024-05-20", "estimated_liquidation_date": "2027-04-05", "days_until_liquidation": 313, "offering_price": 2000.0, "current_price": 2055.0, "rate_y1": 3.32, "rate_y2": 2.4, "rate_y3": 2.55, "liquidation_value": 2139.9, "total_return_pct": 4.13, "annualized_return_pct": 4.84, "rate_source": "DART"}, {"ticker": "477470", "name": "미래에셋비전스팩5호", "payment_date": "2024-06-10", "estimated_liquidation_date": "2027-04-26", "days_until_liquidation": 334, "offering_price": 2000.0, "current_price": 2075.0, "rate_y1": 3.32, "rate_y2": 2.4, "rate_y3": 2.4, "liquidation_value": 2138.4, "total_return_pct": 3.06, "annualized_return_pct": 3.35, "rate_source": "DART"}, {"ticker": "477340", "name": "에이치엠씨제7호스팩", "payment_date": "2024-06-11", "estimated_liquidation_date": "2027-04-27", "days_until_liquidation": 335, "offering_price": 2000.0, "current_price": 2035.0, "rate_y1": 3.45, "rate_y2": 2.47, "rate_y3": 2.47, "liquidation_value": 2143.1, "total_return_pct": 5.31, "annualized_return_pct": 5.81, "rate_source": "DART"}, {"ticker": "478390", "name": "KB제29호스팩", "payment_date": "2024-06-11", "estimated_liquidation_date": "2027-04-27", "days_until_liquidation": 335, "offering_price": 2000.0, "current_price": 2065.0, "rate_y1": 3.32, "rate_y2": 2.4, "rate_y3": 2.4, "liquidation_value": 2138.4, "total_return_pct": 3.55, "annualized_return_pct": 3.88, "rate_source": "DART"}, {"ticker": "478440", "name": "미래에셋비전스팩6호", "payment_date": "2024-06-13", "estimated_liquidation_date": "2027-04-29", "days_until_liquidation": 337, "offering_price": 2000.0, "current_price": 2055.0, "rate_y1": 3.32, "rate_y2": 2.4, "rate_y3": 2.4, "liquidation_value": 2138.4, "total_return_pct": 4.06, "annualized_return_pct": 4.41, "rate_source": "DART"}, {"ticker": "479880", "name": "한국제15호스팩", "payment_date": "2024-06-17", "estimated_liquidation_date": "2027-05-03", "days_until_liquidation": 341, "offering_price": 2000.0, "current_price": 2055.0, "rate_y1": 3.32, "rate_y2": 2.4, "rate_y3": 2.4, "liquidation_value": 2138.4, "total_return_pct": 4.06, "annualized_return_pct": 4.35, "rate_source": "DART"}, {"ticker": "478110", "name": "이베스트스팩6호", "payment_date": "2024-07-02", "estimated_liquidation_date": "2027-05-18", "days_until_liquidation": 356, "offering_price": 2000.0, "current_price": 2045.0, "rate_y1": 3.35, "rate_y2": 2.42, "rate_y3": 2.42, "liquidation_value": 2139.6, "total_return_pct": 4.63, "annualized_return_pct": 4.75, "rate_source": "DART"}, {"ticker": "481890", "name": "엔에이치스팩31호", "payment_date": "2024-07-16", "estimated_liquidation_date": "2027-06-01", "days_until_liquidation": 370, "offering_price": 2000.0, "current_price": 2120.0, "rate_y1": 3.3, "rate_y2": 2.43, "rate_y3": 2.43, "liquidation_value": 2138.9, "total_return_pct": 0.89, "annualized_return_pct": 0.88, "rate_source": "DART"}, {"ticker": "482520", "name": "교보16호스팩", "payment_date": "2024-08-01", "estimated_liquidation_date": "2027-06-17", "days_until_liquidation": 386, "offering_price": 2000.0, "current_price": 2035.0, "rate_y1": 3.3, "rate_y2": 2.43, "rate_y3": 2.43, "liquidation_value": 2138.9, "total_return_pct": 5.11, "annualized_return_pct": 4.82, "rate_source": "DART"}, {"ticker": "482680", "name": "미래에셋비전스팩7호", "payment_date": "2024-09-02", "estimated_liquidation_date": "2027-07-19", "days_until_liquidation": 418, "offering_price": 2000.0, "current_price": 2055.0, "rate_y1": 3.2, "rate_y2": 2.25, "rate_y3": 2.25, "liquidation_value": 2131.5, "total_return_pct": 3.72, "annualized_return_pct": 3.25, "rate_source": "DART"}, {"ticker": "486630", "name": "KB제30호스팩", "payment_date": "2024-09-10", "estimated_liquidation_date": "2027-07-27", "days_until_liquidation": 426, "offering_price": 2000.0, "current_price": 2040.0, "rate_y1": 3.2, "rate_y2": 2.25, "rate_y3": 2.25, "liquidation_value": 2131.5, "total_return_pct": 4.49, "annualized_return_pct": 3.83, "rate_source": "DART"}, {"ticker": "488060", "name": "유진스팩11호", "payment_date": "2024-10-22", "estimated_liquidation_date": "2027-09-07", "days_until_liquidation": 468, "offering_price": 2000.0, "current_price": 2040.0, "rate_y1": 3.3, "rate_y2": 2.57, "rate_y3": 2.57, "liquidation_value": 2143.1, "total_return_pct": 5.05, "annualized_return_pct": 3.92, "rate_source": "DART"}, {"ticker": "487830", "name": "신한제15호스팩", "payment_date": "2024-11-05", "estimated_liquidation_date": "2027-09-21", "days_until_liquidation": 482, "offering_price": 2000.0, "current_price": 2025.0, "rate_y1": 3.3, "rate_y2": 2.72, "rate_y3": 2.72, "liquidation_value": 2147.6, "total_return_pct": 6.05, "annualized_return_pct": 4.56, "rate_source": "DART"}, {"ticker": "484130", "name": "하나34호스팩", "payment_date": "2024-11-07", "estimated_liquidation_date": "2027-09-23", "days_until_liquidation": 484, "offering_price": 2000.0, "current_price": 2025.0, "rate_y1": 3.1, "rate_y2": 2.25, "rate_y3": 2.25, "liquidation_value": 2129.5, "total_return_pct": 5.16, "annualized_return_pct": 3.87, "rate_source": "DART"}, {"ticker": "482690", "name": "대신밸런스제19호스팩", "payment_date": "2024-11-11", "estimated_liquidation_date": "2027-09-27", "days_until_liquidation": 488, "offering_price": 2000.0, "current_price": 2150.0, "rate_y1": 3.3, "rate_y2": 2.82, "rate_y3": 2.82, "liquidation_value": 2150.6, "total_return_pct": 0.03, "annualized_return_pct": 0.02, "rate_source": "DART"}, {"ticker": "489210", "name": "교보17호스팩", "payment_date": "2024-11-11", "estimated_liquidation_date": "2027-09-27", "days_until_liquidation": 488, "offering_price": 2000.0, "current_price": 2080.0, "rate_y1": 3.3, "rate_y2": 2.82, "rate_y3": 2.82, "liquidation_value": 2150.6, "total_return_pct": 3.39, "annualized_return_pct": 2.53, "rate_source": "DART"}, {"ticker": "489730", "name": "디비금융제13호스팩", "payment_date": "2024-11-18", "estimated_liquidation_date": "2027-10-04", "days_until_liquidation": 495, "offering_price": 2000.0, "current_price": 2035.0, "rate_y1": 3.3, "rate_y2": 2.82, "rate_y3": 2.82, "liquidation_value": 2150.6, "total_return_pct": 5.68, "annualized_return_pct": 4.16, "rate_source": "DART"}, {"ticker": "489480", "name": "키움제11호스팩", "payment_date": "2024-12-02", "estimated_liquidation_date": "2027-10-18", "days_until_liquidation": 509, "offering_price": 2000.0, "current_price": 2025.0, "rate_y1": 3.2, "rate_y2": 2.88, "rate_y3": 2.88, "liquidation_value": 2150.4, "total_return_pct": 6.19, "annualized_return_pct": 4.41, "rate_source": "DART"}, {"ticker": "492220", "name": "KB제31호스팩", "payment_date": "2024-12-02", "estimated_liquidation_date": "2027-10-18", "days_until_liquidation": 509, "offering_price": 2000.0, "current_price": 2035.0, "rate_y1": 3.1, "rate_y2": 2.55, "rate_y3": 2.55, "liquidation_value": 2138.5, "total_return_pct": 5.09, "annualized_return_pct": 3.62, "rate_source": "DART"}, {"ticker": "487360", "name": "신한제14호스팩", "payment_date": "2024-12-11", "estimated_liquidation_date": "2027-10-27", "days_until_liquidation": 518, "offering_price": 2000.0, "current_price": 2030.0, "rate_y1": 3.2, "rate_y2": 2.92, "rate_y3": 2.92, "liquidation_value": 2151.6, "total_return_pct": 5.99, "annualized_return_pct": 4.19, "rate_source": "DART"}, {"ticker": "487720", "name": "키움제10호스팩", "payment_date": "2024-12-11", "estimated_liquidation_date": "2027-10-27", "days_until_liquidation": 518, "offering_price": 2000.0, "current_price": 2015.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.16, "annualized_return_pct": 3.61, "rate_source": "KSFC"}, {"ticker": "493790", "name": "유안타제17호스팩", "payment_date": "2025-01-13", "estimated_liquidation_date": "2027-11-29", "days_until_liquidation": 551, "offering_price": 2000.0, "current_price": 2025.0, "rate_y1": 3.0, "rate_y2": 2.8, "rate_y3": 2.8, "liquidation_value": 2144.0, "total_return_pct": 5.88, "annualized_return_pct": 3.86, "rate_source": "DART"}, {"ticker": "498390", "name": "한화플러스제5호스팩", "payment_date": "2025-03-11", "estimated_liquidation_date": "2028-01-25", "days_until_liquidation": 608, "offering_price": 2000.0, "current_price": 2055.0, "rate_y1": 2.83, "rate_y2": 2.93, "rate_y3": 2.93, "liquidation_value": 2144.5, "total_return_pct": 4.36, "annualized_return_pct": 2.59, "rate_source": "DART"}, {"ticker": "496070", "name": "신한제16호스팩", "payment_date": "2025-05-19", "estimated_liquidation_date": "2028-04-03", "days_until_liquidation": 677, "offering_price": 2000.0, "current_price": 2005.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.69, "annualized_return_pct": 3.03, "rate_source": "KSFC"}, {"ticker": "0037T0", "name": "KB제32호스팩", "payment_date": "2025-06-24", "estimated_liquidation_date": "2028-05-09", "days_until_liquidation": 713, "offering_price": 2000.0, "current_price": 2000.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.95, "annualized_return_pct": 3.01, "rate_source": "KSFC"}, {"ticker": "0041J0", "name": "엘에스스팩1호", "payment_date": "2025-07-08", "estimated_liquidation_date": "2028-05-23", "days_until_liquidation": 727, "offering_price": 2000.0, "current_price": 2000.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.95, "annualized_return_pct": 2.95, "rate_source": "KSFC"}, {"ticker": "0004Y0", "name": "디비금융제14호스팩", "payment_date": "2025-07-10", "estimated_liquidation_date": "2028-05-25", "days_until_liquidation": 729, "offering_price": 2000.0, "current_price": 2005.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.69, "annualized_return_pct": 2.81, "rate_source": "KSFC"}, {"ticker": "0041L0", "name": "하나35호스팩", "payment_date": "2025-07-25", "estimated_liquidation_date": "2028-06-09", "days_until_liquidation": 744, "offering_price": 2000.0, "current_price": 2005.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.69, "annualized_return_pct": 2.75, "rate_source": "KSFC"}, {"ticker": "0041B0", "name": "교보18호스팩", "payment_date": "2025-08-05", "estimated_liquidation_date": "2028-06-20", "days_until_liquidation": 755, "offering_price": 2000.0, "current_price": 2030.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 4.38, "annualized_return_pct": 2.1, "rate_source": "KSFC"}, {"ticker": "0044K0", "name": "삼성스팩10호", "payment_date": "2025-08-11", "estimated_liquidation_date": "2028-06-26", "days_until_liquidation": 761, "offering_price": 2000.0, "current_price": 2010.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.42, "annualized_return_pct": 2.57, "rate_source": "KSFC"}, {"ticker": "0071M0", "name": "삼성스팩11호", "payment_date": "2025-09-19", "estimated_liquidation_date": "2028-08-04", "days_until_liquidation": 800, "offering_price": 2000.0, "current_price": 2010.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.42, "annualized_return_pct": 2.44, "rate_source": "KSFC"}, {"ticker": "0072Z0", "name": "KB제33호스팩", "payment_date": "2025-09-22", "estimated_liquidation_date": "2028-08-07", "days_until_liquidation": 803, "offering_price": 2000.0, "current_price": 1994.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.27, "annualized_return_pct": 2.8, "rate_source": "KSFC"}, {"ticker": "0068Y0", "name": "비엔케이제3호스팩", "payment_date": "2025-11-11", "estimated_liquidation_date": "2028-09-26", "days_until_liquidation": 853, "offering_price": 2000.0, "current_price": 2005.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.69, "annualized_return_pct": 2.4, "rate_source": "KSFC"}, {"ticker": "0091W0", "name": "신영스팩11호", "payment_date": "2025-11-13", "estimated_liquidation_date": "2028-09-28", "days_until_liquidation": 855, "offering_price": 2000.0, "current_price": 2050.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 3.37, "annualized_return_pct": 1.42, "rate_source": "KSFC"}, {"ticker": "0093G0", "name": "미래에셋비전스팩8호", "payment_date": "2025-11-17", "estimated_liquidation_date": "2028-10-02", "days_until_liquidation": 859, "offering_price": 2000.0, "current_price": 1997.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.11, "annualized_return_pct": 2.55, "rate_source": "KSFC"}, {"ticker": "0096B0", "name": "삼성스팩12호", "payment_date": "2025-11-19", "estimated_liquidation_date": "2028-10-04", "days_until_liquidation": 861, "offering_price": 2000.0, "current_price": 1997.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.11, "annualized_return_pct": 2.55, "rate_source": "KSFC"}, {"ticker": "0096D0", "name": "미래에셋비전스팩9호", "payment_date": "2025-11-19", "estimated_liquidation_date": "2028-10-04", "days_until_liquidation": 861, "offering_price": 2000.0, "current_price": 1994.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.27, "annualized_return_pct": 2.61, "rate_source": "KSFC"}, {"ticker": "0054V0", "name": "엔에이치스팩32호", "payment_date": "2025-11-24", "estimated_liquidation_date": "2028-10-09", "days_until_liquidation": 866, "offering_price": 2000.0, "current_price": 2030.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 4.38, "annualized_return_pct": 1.83, "rate_source": "KSFC"}, {"ticker": "466690", "name": "키움히어로제1호스팩", "payment_date": "2025-12-01", "estimated_liquidation_date": "2028-10-16", "days_until_liquidation": 873, "offering_price": 2000.0, "current_price": 2010.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.42, "annualized_return_pct": 2.23, "rate_source": "KSFC"}, {"ticker": "0105P0", "name": "유진스팩12호", "payment_date": "2025-12-02", "estimated_liquidation_date": "2028-10-17", "days_until_liquidation": 874, "offering_price": 2000.0, "current_price": 1995.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.22, "annualized_return_pct": 2.55, "rate_source": "KSFC"}, {"ticker": "0098T0", "name": "교보19호스팩", "payment_date": "2025-12-02", "estimated_liquidation_date": "2028-10-17", "days_until_liquidation": 874, "offering_price": 2000.0, "current_price": 2015.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.16, "annualized_return_pct": 2.13, "rate_source": "KSFC"}, {"ticker": "0088D0", "name": "메리츠제1호스팩", "payment_date": "2025-12-04", "estimated_liquidation_date": "2028-10-19", "days_until_liquidation": 876, "offering_price": 2000.0, "current_price": 2140.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": -0.98, "annualized_return_pct": -0.41, "rate_source": "KSFC"}, {"ticker": "0099X0", "name": "IBKS제25호스팩", "payment_date": "2025-12-09", "estimated_liquidation_date": "2028-10-24", "days_until_liquidation": 881, "offering_price": 2000.0, "current_price": 2130.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": -0.52, "annualized_return_pct": -0.21, "rate_source": "KSFC"}, {"ticker": "0099W0", "name": "미래에셋비전스팩11호", "payment_date": "2025-12-10", "estimated_liquidation_date": "2028-10-25", "days_until_liquidation": 882, "offering_price": 2000.0, "current_price": 1999.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.0, "annualized_return_pct": 2.44, "rate_source": "KSFC"}, {"ticker": "0101C0", "name": "하나36호스팩", "payment_date": "2025-12-11", "estimated_liquidation_date": "2028-10-26", "days_until_liquidation": 883, "offering_price": 2000.0, "current_price": 1998.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.06, "annualized_return_pct": 2.46, "rate_source": "KSFC"}, {"ticker": "0097F0", "name": "미래에셋비전스팩10호", "payment_date": "2025-12-12", "estimated_liquidation_date": "2028-10-27", "days_until_liquidation": 884, "offering_price": 2000.0, "current_price": 1996.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.16, "annualized_return_pct": 2.5, "rate_source": "KSFC"}, {"ticker": "0115H0", "name": "삼성스팩13호", "payment_date": "2026-01-12", "estimated_liquidation_date": "2028-11-27", "days_until_liquidation": 915, "offering_price": 2000.0, "current_price": 1997.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.11, "annualized_return_pct": 2.4, "rate_source": "KSFC"}, {"ticker": "0130H0", "name": "엔에이치스팩33호", "payment_date": "2026-03-17", "estimated_liquidation_date": "2029-01-30", "days_until_liquidation": 979, "offering_price": 2000.0, "current_price": 2005.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 5.69, "annualized_return_pct": 2.08, "rate_source": "KSFC"}, {"ticker": "0130D0", "name": "신한제17호스팩", "payment_date": "2026-03-19", "estimated_liquidation_date": "2029-02-01", "days_until_liquidation": 981, "offering_price": 2000.0, "current_price": 1992.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.38, "annualized_return_pct": 2.33, "rate_source": "KSFC"}, {"ticker": "0132G0", "name": "교보20호스팩", "payment_date": "2026-03-23", "estimated_liquidation_date": "2029-02-05", "days_until_liquidation": 985, "offering_price": 2000.0, "current_price": 1995.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.22, "annualized_return_pct": 2.26, "rate_source": "KSFC"}, {"ticker": "0131D0", "name": "키움히어로제2호스팩", "payment_date": "2026-04-14", "estimated_liquidation_date": "2029-02-27", "days_until_liquidation": 1007, "offering_price": 2000.0, "current_price": 1981.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.97, "annualized_return_pct": 2.47, "rate_source": "KSFC"}, {"ticker": "0129K0", "name": "신한제18호스팩", "payment_date": "2026-04-20", "estimated_liquidation_date": "2029-03-05", "days_until_liquidation": 1013, "offering_price": 2000.0, "current_price": 1993.0, "rate_y1": 2.38, "rate_y2": 2.38, "rate_y3": 2.38, "liquidation_value": 2119.0, "total_return_pct": 6.32, "annualized_return_pct": 2.23, "rate_source": "KSFC"}];
+const KSFC = {"rate": 2.38, "date": "2026-05-27"};
+const UPDATED = "2026-05-27 17:19";
+
+let sortKey = "days_until_liquidation";
+let sortAsc = true;
+let view = [...DATA];
+
+function fmt(v, type) {
+  if (v === null || v === undefined || v === "") return "—";
+  if (type === "int") return Number(v).toLocaleString();
+  if (type === "money") return Number(v).toLocaleString(undefined, {maximumFractionDigits: 1});
+  if (type === "pct") {
+    const n = Number(v);
+    return (n >= 0 ? "+" : "") + n.toFixed(2);
+  }
+  if (type === "rate") return Number(v).toFixed(2);
+  return v;
+}
+
+function renderMeta() {
+  const ksfcMsg = KSFC.rate !== null
+    ? `KSFC 12개월 금리: <b>${KSFC.rate}%</b> (${KSFC.date || "기준일 없음"})`
+    : `KSFC 금리 미설정`;
+  document.getElementById("meta").innerHTML =
+    `최종 갱신: <b>${UPDATED}</b> · ${ksfcMsg}`;
+}
+
+function renderStats() {
+  const total = DATA.length;
+  const imminent = DATA.filter(r => r.days_until_liquidation !== null && r.days_until_liquidation <= 90).length;
+  const yields = DATA.map(r => r.annualized_return_pct).filter(v => v !== null && !isNaN(v));
+  const maxY = yields.length ? Math.max(...yields).toFixed(2) : "—";
+  const avgY = yields.length ? (yields.reduce((a,b) => a+b, 0) / yields.length).toFixed(2) : "—";
+
+  document.getElementById("stats").innerHTML = `
+    <div class="stat"><div class="label">총 종목 수</div><div class="value">${total}개</div></div>
+    <div class="stat"><div class="label">⚠️ 청산임박 (90일↓)</div><div class="value">${imminent}개</div></div>
+    <div class="stat"><div class="label">최고 연환산 수익률</div><div class="value">${maxY}%</div></div>
+    <div class="stat"><div class="label">평균 연환산 수익률</div><div class="value">${avgY}%</div></div>
+  `;
+}
+
+function applyFilters() {
+  const q = document.getElementById("search").value.trim();
+  const hideNoRate = document.getElementById("hideNoRate").checked;
+  const onlyPos = document.getElementById("onlyPositive").checked;
+  const imminentOnly = document.getElementById("imminentOnly").checked;
+
+  view = DATA.filter(r => {
+    if (q && !(r.name || "").includes(q)) return false;
+    if (hideNoRate && (r.rate_y1 === null || r.rate_y1 === undefined)) return false;
+    if (onlyPos && !(r.annualized_return_pct > 0)) return false;
+    if (imminentOnly && !(r.days_until_liquidation !== null && r.days_until_liquidation <= 180)) return false;
+    return true;
+  });
+  sortAndRender();
+}
+
+function sortAndRender() {
+  view.sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (av === null || av === undefined) av = sortAsc ? Infinity : -Infinity;
+    if (bv === null || bv === undefined) bv = sortAsc ? Infinity : -Infinity;
+    if (typeof av === "number" && typeof bv === "number") return sortAsc ? av - bv : bv - av;
+    av = String(av); bv = String(bv);
+    return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+
+  document.querySelectorAll("th").forEach(th => {
+    th.classList.remove("sort-asc", "sort-desc");
+    const arr = th.querySelector(".arrow");
+    if (arr) arr.textContent = "↕";
+    if (th.dataset.key === sortKey) {
+      th.classList.add(sortAsc ? "sort-asc" : "sort-desc");
+      if (arr) arr.textContent = sortAsc ? "↑" : "↓";
+    }
+  });
+
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = view.map(r => {
+    const days = r.days_until_liquidation;
+    let daysClass = "";
+    if (days !== null && days !== undefined) {
+      if (days <= 90) daysClass = "days-red";
+      else if (days <= 180) daysClass = "days-yellow";
+    }
+    const ann = r.annualized_return_pct;
+    let yieldClass = "";
+    if (ann !== null && ann !== undefined) {
+      if (ann >= 5) yieldClass = "yield-high";
+      else if (ann >= 3) yieldClass = "yield-mid";
+      else if (ann < 0) yieldClass = "yield-neg";
+    }
+    const sourceClass = r.rate_source ? `source-${r.rate_source}` : "";
+
+    return `<tr>
+      <td>${r.ticker || ""}</td>
+      <td>${r.name || ""}</td>
+      <td class="center">${r.payment_date || "—"}</td>
+      <td class="center">${r.estimated_liquidation_date || "—"}</td>
+      <td class="center ${daysClass}">${days !== null && days !== undefined ? days.toLocaleString() : "—"}</td>
+      <td class="numeric">${fmt(r.offering_price, "int")}</td>
+      <td class="numeric">${fmt(r.current_price, "int")}</td>
+      <td class="numeric">${fmt(r.rate_y1, "rate")}</td>
+      <td class="numeric">${fmt(r.rate_y2, "rate")}</td>
+      <td class="numeric">${fmt(r.rate_y3, "rate")}</td>
+      <td class="numeric">${fmt(r.liquidation_value, "money")}</td>
+      <td class="numeric ${yieldClass}">${fmt(r.total_return_pct, "pct")}</td>
+      <td class="numeric ${yieldClass}">${fmt(r.annualized_return_pct, "pct")}</td>
+      <td class="center"><span class="${sourceClass}">${r.rate_source || "—"}</span></td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("count").textContent = `${view.length} / ${DATA.length} 개`;
+}
+
+document.querySelectorAll("th").forEach(th => {
+  if (!th.dataset.key) return;
+  th.addEventListener("click", () => {
+    if (sortKey === th.dataset.key) sortAsc = !sortAsc;
+    else { sortKey = th.dataset.key; sortAsc = true; }
+    sortAndRender();
+  });
+});
+document.getElementById("search").addEventListener("input", applyFilters);
+document.getElementById("hideNoRate").addEventListener("change", applyFilters);
+document.getElementById("onlyPositive").addEventListener("change", applyFilters);
+document.getElementById("imminentOnly").addEventListener("change", applyFilters);
+
+renderMeta();
+renderStats();
+sortAndRender();
+</script>
+</body>
+</html>
